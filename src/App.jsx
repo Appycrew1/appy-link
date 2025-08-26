@@ -58,6 +58,18 @@ function useHashRoute(defaultHash = "#home") {
 }
 
 function useLocalStorage(key, initialValue) {
+  // Build a logo URL for a provider: prefer explicit logo_url, else fall back to site favicon
+function getLogo(provider) {
+  if (provider.logo) return provider.logo;           // optional local field
+  if (provider.logo_url) return provider.logo_url;   // from Supabase
+  try {
+    const url = new URL(provider.website || "");
+    return `https://www.google.com/s2/favicons?domain=${url.hostname}&sz=64`;
+  } catch {
+    return `https://www.google.com/s2/favicons?domain=example.com&sz=64`;
+  }
+}
+
   const [value, setValue] = useState(() => {
     try {
       const raw = localStorage.getItem(key);
