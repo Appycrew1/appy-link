@@ -77,18 +77,12 @@ function useLocalStorage(key, initialValue) {
 /***********************************\
 |*         SUPABASE CLIENT         *|
 \***********************************/
-let supabase = null;
-try {
-  // Lazy import to avoid build issues if env is missing
-  const { createClient } = await import("@supabase/supabase-js").catch(() => ({ createClient: null }));
-  const url = import.meta?.env?.VITE_SUPABASE_URL;
-  const key = import.meta?.env?.VITE_SUPABASE_ANON_KEY;
-  if (createClient && url && key) {
-    supabase = createClient(url, key);
-  }
-} catch (_) {
-  // ignore – fallback to seed data
-}
+import { createClient } from "@supabase/supabase-js";
+
+const SB_URL = import.meta?.env?.VITE_SUPABASE_URL;
+const SB_KEY = import.meta?.env?.VITE_SUPABASE_ANON_KEY;
+const supabase = (SB_URL && SB_KEY) ? createClient(SB_URL, SB_KEY) : null;
+
 
 /***********************************\
 |*          SAMPLE CONTENT          *|
