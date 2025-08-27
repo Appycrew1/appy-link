@@ -785,19 +785,76 @@ function AdminDashboard() {
 
 function AdminPortal() {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [allowed, setAllowed] = useState(false);
+  const BOOTSTRAP_ADMIN = import.meta?.env?.VITE_BOOTSTRAP_ADMIN_EMAIL; // optional safety net
+
   useEffect(() => {
+    if (!supabase) return;
+    let unsub = supabase.auth.onAuthStateChange(async () => {
+      // any auth change → re-evaluate
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user || null);
+      if (!user) { setAllowed(false); setLoading(false); return; }
+
+      // Bootstrap: allow the configured email even if profiles row hasn't been created yet
+      if (BOOTSTRAP_ADMIN && user.email && user.email.toLowerCase() === BOOTSTRAP_ADMIN.toLowerCase()) {
+        setAllowed(true); setLoading(false); return;
+      }
+
+      // Check role from profiles (RLS policies must allow select of own row / admin)
+      const { data: prof, error } = await supabase
+        .from("profiles")
+        .select("role")
+        .eq("id", user.id)
+        .maybeSingle();
+
+      if (error) {
+        console.warn("profiles read error", error.message);
+        setAllowed(false);
+      } else {
+        setAllowed(prof?.role === 'admin');
+      }
+      setLoading(false);
+    }).data?.subscription;
+
+    // initial load (covers hard refresh)
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       setUser(user || null);
-      if (!user) return;
-      const { data: rows } = await supabase.from("profiles").select("role").eq("id", user.id).single();
-      setAllowed(rows?.role === "admin");
+      if (!user) { setAllowed(false); setLoading(false); return; }
+      if (BOOTSTRAP_ADMIN && user.email && user.email.toLowerCase() === BOOTSTRAP_ADMIN.toLowerCase()) {
+        setAllowed(true); setLoading(false); return;
+      }
+      const { data: prof } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+      setAllowed(prof?.role === 'admin');
+      setLoading(false);
     })();
+
+    return () => { try { unsub && unsub.unsubscribe && unsub.unsubscribe(); } catch {} };
   }, []);
-  if (!supabase) return <section className="mx-auto max-w-2xl px-4 py-10">Supabase env not configured.</section>;
+
+  if (!supabase) return (
+    <section className="mx-auto max-w-xl px-4 py-10">
+      <h2 className="mb-2 text-2xl font-bold">Supabase not configured</h2>
+      <ol className="list-decimal pl-5 text-sm text-gray-700 space-y-1">
+        <li>Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Vercel (Preview + Production).</li>
+        <li>Redeploy the site.</li>
+        <li>Supabase → Auth → URL Config: add <code>{window.location.origin}/#admin</code> to Redirect URLs.</li>
+      </ol>
+    </section>
+  );
+
+  if (loading) return <section className="mx-auto max-w-2xl px-4 py-10">Checking session…</section>;
   if (!user) return <AdminLogin />;
-  if (!allowed) return <section className="mx-auto max-w-2xl px-4 py-10">Signed in, but not an admin.</section>;
+  if (!allowed) return (
+    <section className="mx-auto max-w-xl px-4 py-10">
+      <h2 className="mb-3 text-2xl font-bold">Access restricted</h2>
+      <p className="text-sm text-gray-700">You are signed in as <strong>{user.email}</strong> but not recognised as an admin.</p>
+      <p className="mt-2 text-sm text-gray-700">Ask an admin to set your role in <code>public.profiles</code> or set <code>VITE_BOOTSTRAP_ADMIN_EMAIL</code> to your email and redeploy, then refresh this page.</p>
+    </section>
+  );
+
   return <AdminDashboard />;
 }
 
