@@ -628,6 +628,12 @@ function AdminDashboard() {
   const [prov, setProv] = useState([]);
   const [cats, setCats] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [tab, setTab] = useState("submissions");
+  const [subs, setSubs] = useState([]);
+  const [prov, setProv] = useState([]);
+  const [cats, setCats] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const load = async () => {
     setLoading(true);
@@ -643,6 +649,18 @@ function AdminDashboard() {
   };
 
   useEffect(() => { load(); }, []);
+
+  // detect role non-blocking so dashboard still renders
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) { setIsAdmin(false); return; }
+        const { data: prof } = await supabase.from("profiles").select("role").eq("id", user.id).maybeSingle();
+        setIsAdmin(prof?.role === 'admin');
+      } catch { setIsAdmin(false); }
+    })();
+  }, []);
 
   // Submissions actions
   const approve = async (id) => { await supabase.rpc("approve_submission", { sub_id:id, publish:true }); await load(); };
@@ -700,6 +718,11 @@ function AdminDashboard() {
 
   return (
     <section className="mx-auto max-w-5xl px-4 py-10">
+      {!isAdmin && (
+        <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+          You are signed in but not marked as <strong>admin</strong>. Read-only features will work; write actions may be blocked by RLS. To enable full access, set your role to <code>admin</code> in <code>public.profiles</code>.
+        </div>
+      )}
       <div className="mb-6 flex items-center justify-between">
         <h2 className="text-2xl font-bold">Admin</h2>
         <div className="flex flex-wrap gap-2">
@@ -785,6 +808,39 @@ function AdminDashboard() {
 
 function AdminPortal() {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    if (!supabase) return;
+    const { data: sub } = supabase.auth.onAuthStateChange(async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user || null);
+      setLoading(false);
+    });
+    // initial
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user || null);
+      setLoading(false);
+    })();
+    return () => { sub?.subscription?.unsubscribe?.(); };
+  }, []);
+
+  if (!supabase) return (
+    <section className="mx-auto max-w-xl px-4 py-10">
+      <h2 className="mb-2 text-2xl font-bold">Supabase not configured</h2>
+      <ol className="list-decimal pl-5 text-sm text-gray-700 space-y-1">
+        <li>Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Vercel (Preview + Production).</li>
+        <li>Redeploy the site.</li>
+        <li>Supabase → Auth → URL Config: add <code>{window.location.origin}/#admin</code> to Redirect URLs.</li>
+      </ol>
+    </section>
+  );
+
+  if (loading) return <section className="mx-auto max-w-2xl px-4 py-10">Checking session…</section>;
+  if (!user) return <AdminLogin />;
+  return <AdminDashboard />;
+}
   const [loading, setLoading] = useState(true);
   const [allowed, setAllowed] = useState(false);
   const BOOTSTRAP_ADMIN = import.meta?.env?.VITE_BOOTSTRAP_ADMIN_EMAIL; // optional safety net
