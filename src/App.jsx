@@ -5,11 +5,12 @@ import { createClient } from "@supabase/supabase-js";
  * Appy Link – Linking movers with suppliers (UK)
  * -------------------------------------------------
  * Single‑file React + Tailwind app, production‑ready, wired to Supabase.
- * - Reads categories & providers from Supabase (fallback to local seed)
- * - Circular logos with favicon fallback
- * - Favorites & Compare (localStorage)
- * - Submit Listing & Contact -> Supabase tables (local fallback)
- * - Sections: Home, Suppliers, Discounts, Learning, Submit, Contact
+ * - Public site: directory with filters, favorites, compare, discounts, learning
+ * - Forms: Submit Listing, Contact (with anti‑spam)
+ * - Admin: login (magic link), submissions review (approve/reject), suppliers CRUD (show/hide/add/edit/delete), categories CRUD
+ * - Monetisation: featured/tier fields, home "Featured" section, admin controls to set/expire featuring
+ * - Security: Supabase RLS so only admins can write; public can read providers/categories and submit forms
+ * - Scalability: pagination support, favicon logo fallback, lazy images
  *
  * ENV (Vercel → Settings → Environment Variables)
  *  - VITE_SUPABASE_URL
@@ -88,7 +89,7 @@ const categoriesSeed = [
 ];
 
 const providersSeed = [
-  { id: "moveman", name: "MoveMan", category: "software", tags: ["UK","CRM","Operations"], website: "https://www.movemanpro.com/", logo: "https://www.google.com/s2/favicons?domain=movemanpro.com&sz=128", summary: "Removals management software widely used in the UK.", details: "Quoting, scheduling, dispatch & storage; long‑standing UK vendor." },
+  { id: "moveman", name: "MoveMan", category: "software", tags: ["UK","CRM","Operations"], website: "https://www.movemanpro.com/", logo: "https://www.google.com/s2/favicons?domain=movemanpro.com&sz=128", summary: "Removals management software widely used in the UK.", details: "Quoting, scheduling, dispatch & storage; long‑standing UK vendor.", is_featured: true },
   { id: "moveware", name: "Moveware", category: "software", tags: ["ERP","CRM","Accounting"], website: "https://www.moveconnect.com/", logo: "https://www.google.com/s2/favicons?domain=moveconnect.com&sz=128", summary: "Complete ERP/CRM for moving & storage companies.", details: "Manage sales, ops and accounting in one platform." },
   { id: "moneypenny", name: "Moneypenny (UK)", category: "sales", tags: ["Call Answering","Live Chat","UK"], website: "https://www.moneypenny.com/uk/", logo: "https://www.google.com/s2/favicons?domain=moneypenny.com&sz=128", summary: "Professional call answering and live chat.", details: "Overflow and 24/7 options to capture enquiries and bookings." },
   { id: "basilfry", name: "Basil Fry & Company", category: "insurance", tags: ["Broker","Removals","Storage"], website: "https://basilfry.co.uk/removals-and-storage/", logo: "https://www.google.com/s2/favicons?domain=basilfry.co.uk&sz=128", summary: "Specialist insurance for removals & storage.", details: "Risk management and claims handling for UK movers." },
@@ -133,7 +134,7 @@ const TextArea = ({ className="", ...props }) => (
 /***********************************\
 |*       DATA LOADER (REMOTE)      *|
 \***********************************/
-function useProvidersAndCategories() {
+function useProvidersAndCategories({ page = 1, pageSize = 48 } = {}) {
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState(categoriesSeed);
   const [providers, setProviders] = useState(providersSeed);
@@ -144,9 +145,11 @@ function useProvidersAndCategories() {
     (async () => {
       if (!supabase) { setLoading(false); return; }
       try {
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
         const [{ data: cats, error: catErr }, { data: provs, error: provErr }] = await Promise.all([
           supabase.from("categories").select("id,label").order("label"),
-          supabase.from("providers").select("id,name,category_id,tags,website,summary,details,discount_label,discount_details,logo,is_active").eq("is_active", true).order("name"),
+          supabase.from("providers").select("id,name,category_id,tags,website,summary,details,discount_label,discount_details,logo,is_active,is_featured,feature_until,tier").eq("is_active", true).order("is_featured", { ascending:false }).order("name").range(from, to),
         ]);
         if (catErr) throw catErr; if (provErr) throw provErr;
         if (mounted) {
@@ -163,7 +166,9 @@ function useProvidersAndCategories() {
             summary: p.summary,
             details: p.details,
             discount: p.discount_label ? { label: p.discount_label, details: p.discount_details } : p.discount || null,
-            logo: p.logo || p.logo_url, // support either column
+            logo: p.logo || p.logo_url,
+            is_featured: !!p.is_featured || (p.feature_until ? new Date(p.feature_until) > new Date() : false),
+            tier: p.tier || "free",
           }));
           setProviders(mapped);
         }
@@ -171,7 +176,7 @@ function useProvidersAndCategories() {
       finally { mounted && setLoading(false); }
     })();
     return () => { mounted = false; };
-  }, []);
+  }, [page, pageSize]);
 
   return { loading, categories, providers, error };
 }
@@ -183,10 +188,13 @@ const ProviderCard = ({ p, onOpen, onToggleFav, isFav, onCompareToggle, comparin
   <div className="group relative flex h-full flex-col rounded-2xl border border-gray-200 bg-white p-4 shadow-sm transition hover:shadow-md">
     <div className="mb-3 flex items-start justify-between gap-3">
       <div className="flex items-center gap-3 min-w-0">
-        <img src={getLogo(p)} alt="" className="h-10 w-10 rounded-full object-cover border border-gray-200 bg-white"/>
+        <img src={getLogo(p)} loading="lazy" alt="" className="h-10 w-10 rounded-full object-cover border border-gray-200 bg-white"/>
         <h3 className="truncate text-base font-semibold text-gray-900">{p.name}</h3>
       </div>
-      {p.discount && (<Badge color="bg-green-100 text-green-800">{p.discount.label}</Badge>)}
+      <div className="flex items-center gap-2">
+        {p.is_featured && <Badge color="bg-yellow-100 text-yellow-800">Featured</Badge>}
+        {p.discount && (<Badge color="bg-green-100 text-green-800">{p.discount.label}</Badge>)}
+      </div>
     </div>
     <div className="mb-3 flex flex-wrap gap-1">
       <Badge>{p.categoryLabel || p.category}</Badge>
@@ -209,7 +217,7 @@ const ProviderModal = ({ provider, onClose }) => {
   if (!provider) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" role="dialog" aria-modal>
-      <div className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
+      <div className="max-h:[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-6 shadow-2xl">
         <div className="mb-4 flex items-start justify-between gap-3">
           <div className="flex items-center gap-3">
             <img src={getLogo(provider)} alt="" className="h-10 w-10 rounded-full object-cover border border-gray-200 bg-white"/>
@@ -220,6 +228,7 @@ const ProviderModal = ({ provider, onClose }) => {
         <div className="mb-3 flex flex-wrap gap-1">
           <Badge>{provider.categoryLabel}</Badge>
           {provider.tags?.map(t => <Badge key={t}>{t}</Badge>)}
+          {provider.is_featured && <Badge color="bg-yellow-100 text-yellow-800">Featured</Badge>}
           {provider.discount && (<Badge color="bg-green-100 text-green-800">{provider.discount.label}</Badge>)}
         </div>
         <p className="mb-4 text-gray-700">{provider.details || provider.summary}</p>
@@ -235,6 +244,8 @@ const ProviderModal = ({ provider, onClose }) => {
 |*              PAGES              *|
 \***********************************/
 function Home() {
+  const { providers } = useProvidersAndCategories({ pageSize: 100 });
+  const featured = providers.filter(p => p.is_featured).slice(0, 6);
   return (
     <section className="mx-auto max-w-7xl px-4 py-16">
       <div className="grid items-center gap-10 md:grid-cols-2">
@@ -261,6 +272,23 @@ function Home() {
           </div>
         </div>
       </div>
+
+      {featured.length > 0 && (
+        <div className="mt-12">
+          <h3 className="mb-4 text-lg font-semibold text-gray-900">Featured suppliers</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {featured.map(p => (
+              <div key={p.id} className="rounded-2xl border border-amber-200 bg-amber-50 p-4 shadow-sm">
+                <div className="mb-2 flex items-center gap-3">
+                  <img src={getLogo(p)} alt="" className="h-8 w-8 rounded-full border border-amber-200 bg-white"/>
+                  <div className="font-semibold">{p.name}</div>
+                </div>
+                <div className="text-sm text-gray-700">{p.summary}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -285,6 +313,8 @@ function Providers({ state, dispatch, favorites, setFavorites, compare, setCompa
     if (state.q.trim()) { const q = state.q.toLowerCase(); r = r.filter(p => p.name.toLowerCase().includes(q) || p.summary?.toLowerCase().includes(q) || p.details?.toLowerCase().includes(q) || p.tags?.some(t => t.toLowerCase().includes(q))); }
     if (state.sort === "name-asc") r.sort((a,b)=>a.name.localeCompare(b.name));
     if (state.sort === "name-desc") r.sort((a,b)=>b.name.localeCompare(a.name));
+    // keep featured near top for relevance sort
+    if (state.sort === "relevance") r.sort((a,b)=> (b.is_featured?1:0) - (a.is_featured?1:0));
     return r;
   }, [state, providers]);
 
@@ -418,7 +448,7 @@ function Compare({ compare, setCompare }) {
               <div className="mb-3 text-xs text-gray-600">{p.categoryLabel}</div>
               <p className="mb-3 text-sm text-gray-700">{p.summary}</p>
               <ul className="mb-4 list-disc pl-5 text-sm text-gray-700">{(p.tags||[]).map(t => <li key={t}>{t}</li>)}</ul>
-              {p.website && (<a href={p.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-2xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Visit ↗</a>)}
+              {p.website && (<a href={p.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-2xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg:black">Visit ↗</a>)}
             </div>
           ))}
         </div>
@@ -446,7 +476,7 @@ function Discounts() {
               <Badge color="bg-green-100 text-green-800">{p.discount?.label}</Badge>
             </div>
             <p className="mb-4 text-sm text-gray-600">{p.summary}</p>
-            <a href={p.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-2xl bg-gray-900 px-3 py-2 text-sm font-semibold text-white hover:bg-black">Redeem / Learn More ↗</a>
+            <a href={p.website} target="_blank" rel="noreferrer" className="inline-flex items-center gap-2 rounded-2xl bg-gray-900 px-3 py-2 text-sm font-semibold text:white hover:bg-black">Redeem / Learn More ↗</a>
           </div>
         ))}
       </div>
@@ -479,16 +509,21 @@ function LearningCenter() {
 }
 
 function SubmitListing() {
-  const [values, set] = useState({ name: "", category: "software", website: "", description: "", discount: "" });
+  const [values, set] = useState({ name: "", category: "software", website: "", description: "", discount: "", honey: "" });
   const [done, setDone] = useState(false);
   const [err, setErr] = useState("");
 
   const onSubmit = async (e) => {
     e.preventDefault(); setErr("");
+    // basic anti‑spam: hidden honeypot + simple throttling
+    if (values.honey) return; // bots fill hidden field
+    const last = +localStorage.getItem("last_submit_ts") || 0;
+    if (Date.now() - last < 30000) { setErr("Please wait a moment before submitting again."); return; }
+
     try {
       if (supabase) {
         const { error } = await supabase.from("listing_submissions").insert([{ company_name: values.name, category_id: values.category, website: values.website, description: values.description, discount: values.discount }]);
-        if (error) throw error; setDone(true);
+        if (error) throw error; setDone(true); localStorage.setItem("last_submit_ts", String(Date.now()));
       } else {
         const drafts = JSON.parse(localStorage.getItem("draft_listings") || "[]"); drafts.push({ ...values, id: `draft-${Date.now()}` }); localStorage.setItem("draft_listings", JSON.stringify(drafts)); setDone(true);
       }
@@ -503,6 +538,7 @@ function SubmitListing() {
       ) : (
         <form onSubmit={onSubmit} className="space-y-4">
           {err && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{err}</div>}
+          <div className="hidden"><label>Company</label><input value={values.honey} onChange={(e)=>set({ ...values, honey:e.target.value })}/></div>
           <div><label className="mb-1 block text-sm font-semibold text-gray-800">Company Name</label><TextInput value={values.name} onChange={(e)=>set({ ...values, name:e.target.value })} required/></div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
@@ -523,12 +559,13 @@ function SubmitListing() {
 }
 
 function Contact() {
-  const [values, set] = useState({ name: "", email: "", message: "" });
+  const [values, set] = useState({ name: "", email: "", message: "", honey: "" });
   const [sent, setSent] = useState(false);
   const [err, setErr] = useState("");
 
   const onSubmit = async (e) => {
     e.preventDefault(); setErr("");
+    if (values.honey) return;
     try {
       if (supabase) {
         const { error } = await supabase.from("contact_messages").insert([{ name: values.name, email: values.email, message: values.message }]);
@@ -547,6 +584,7 @@ function Contact() {
       ) : (
         <form onSubmit={onSubmit} className="space-y-4">
           {err && <div className="rounded-xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">{err}</div>}
+          <div className="hidden"><label>Company</label><input value={values.honey} onChange={(e)=>set({ ...values, honey:e.target.value })}/></div>
           <div><label className="mb-1 block text-sm font-semibold text-gray-800">Name</label><TextInput value={values.name} onChange={(e)=>set({ ...values, name:e.target.value })} required/></div>
           <div><label className="mb-1 block text-sm font-semibold text-gray-800">Email</label><TextInput type="email" value={values.email} onChange={(e)=>set({ ...values, email:e.target.value })} required/></div>
           <div><label className="mb-1 block text-sm font-semibold text-gray-800">Message</label><TextArea value={values.message} onChange={(e)=>set({ ...values, message:e.target.value })} required/></div>
@@ -555,6 +593,212 @@ function Contact() {
       )}
     </section>
   );
+}
+
+/***********************************\
+|*           ADMIN PORTAL          *|
+\***********************************/
+function AdminLogin() {
+  const [email, setEmail] = useState("");
+  const [msg, setMsg] = useState("");
+  if (!supabase) return <section className="mx-auto max-w-2xl px-4 py-10">Supabase env not configured.</section>;
+  const login = async (e) => {
+    e.preventDefault();
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.origin + "/#admin" }
+    });
+    setMsg(error ? error.message : "Check your email for a magic link.");
+  };
+  return (
+    <section className="mx-auto max-w-sm px-4 py-10">
+      <h2 className="mb-4 text-2xl font-bold">Admin Login</h2>
+      <form onSubmit={login} className="space-y-3">
+        <TextInput type="email" placeholder="you@company.com" value={email} onChange={(e)=>setEmail(e.target.value)} required />
+        <Button type="submit">Send magic link</Button>
+      </form>
+      {msg && <p className="mt-3 text-sm text-gray-600">{msg}</p>}
+    </section>
+  );
+}
+
+function AdminDashboard() {
+  const [tab, setTab] = useState("submissions");
+  const [subs, setSubs] = useState([]);
+  const [prov, setProv] = useState([]);
+  const [cats, setCats] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = async () => {
+    setLoading(true);
+    const [sRes, pRes, cRes] = await Promise.all([
+      supabase.from("listing_submissions").select("*").order("created_at", { ascending:false }),
+      supabase.from("providers").select("*").order("created_at", { ascending:false }),
+      supabase.from("categories").select("*").order("label", { ascending:true }),
+    ]);
+    setSubs(sRes.data || []);
+    setProv(pRes.data || []);
+    setCats(cRes.data || []);
+    setLoading(false);
+  };
+
+  useEffect(() => { load(); }, []);
+
+  // Submissions actions
+  const approve = async (id) => { await supabase.rpc("approve_submission", { sub_id:id, publish:true }); await load(); };
+  const reject  = async (id) => { await supabase.from("listing_submissions").update({ status:"rejected" }).eq("id", id); await load(); };
+
+  // Providers actions
+  const toggleShow = async (id, on) => { await supabase.from("providers").update({ is_active:on }).eq("id", id); await load(); };
+  const delProv    = async (id) => { if (confirm("Delete provider?")) { await supabase.from("providers").delete().eq("id", id); await load(); } };
+  const addProv    = async () => {
+    const name = prompt("Company name?");
+    if (!name) return;
+    const website = prompt("Website (https://)") || null;
+    const category_id = prompt("Category id (e.g. software, marketing)", cats[0]?.id || "software") || "software";
+    await supabase.from("providers").insert([{ name, category_id, website, is_active:false }]);
+    await load();
+  };
+  const editProv   = async (row) => {
+    const name = prompt("Name", row.name) ?? row.name;
+    const website = prompt("Website", row.website ?? "") ?? row.website;
+    const category_id = prompt("Category id", row.category_id ?? "") ?? row.category_id;
+    const logo = prompt("Logo URL (optional)", row.logo ?? "") ?? row.logo;
+    const tier = prompt("Tier (free/featured/sponsor)", row.tier ?? "free") ?? row.tier;
+    const is_featured = tier !== "free" ? true : confirm("Mark as featured? OK=yes, Cancel=no");
+    await supabase.from("providers").update({ name, website, category_id, logo, tier, is_featured }).eq("id", row.id);
+    await load();
+  };
+
+  // Categories actions
+  const addCat = async () => {
+    const id = prompt("Category id (letters only, e.g. software)");
+    if (!id) return;
+    const label = prompt("Category label", id) || id;
+    await supabase.from("categories").insert([{ id, label }]);
+    await load();
+  };
+  const editCat = async (row) => {
+    const idNew = prompt("Category id", row.id) ?? row.id;
+    const label = prompt("Label", row.label) ?? row.label;
+    if (idNew !== row.id) {
+      await supabase.from("categories").insert([{ id: idNew, label }]);
+      await supabase.from("providers").update({ category_id: idNew }).eq("category_id", row.id);
+      await supabase.from("categories").delete().eq("id", row.id);
+    } else {
+      await supabase.from("categories").update({ label }).eq("id", row.id);
+    }
+    await load();
+  };
+  const deleteCat = async (row) => {
+    const inUse = prov.filter(p => p.category_id === row.id).length;
+    if (inUse > 0) { alert(`Cannot delete: ${inUse} provider(s) still use this category. Reassign them first.`); return; }
+    if (confirm(`Delete category "${row.label}"?`)) { await supabase.from("categories").delete().eq("id", row.id); await load(); }
+  };
+
+  if (loading) return <section className="mx-auto max-w-5xl px-4 py-10">Loading…</section>;
+
+  return (
+    <section className="mx-auto max-w-5xl px-4 py-10">
+      <div className="mb-6 flex items-center justify-between">
+        <h2 className="text-2xl font-bold">Admin</h2>
+        <div className="flex flex-wrap gap-2">
+          <OutlineButton onClick={() => setTab("submissions")}>Submissions</OutlineButton>
+          <OutlineButton onClick={() => setTab("suppliers")}>Suppliers</OutlineButton>
+          <OutlineButton onClick={() => setTab("categories")}>Categories</OutlineButton>
+          <Button onClick={async ()=>{ await supabase.auth.signOut(); location.reload(); }}>Sign out</Button>
+        </div>
+      </div>
+
+      {tab === "submissions" && (
+        <div className="space-y-3">
+          {subs.length === 0 && <div className="rounded-xl border border-dashed border-gray-300 p-6 text-gray-600">No submissions.</div>}
+          {subs.map(s => (
+            <div key={s.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between">
+                <div className="font-semibold">{s.company_name}</div>
+                <span className="text-xs">{s.status ?? "new"}</span>
+              </div>
+              <div className="mt-1 text-sm text-gray-600">{s.website}</div>
+              <div className="mt-2 text-sm">{s.description}</div>
+              <div className="mt-3 flex gap-2">
+                <Button onClick={() => approve(s.id)}>Approve & Publish</Button>
+                <OutlineButton onClick={() => reject(s.id)}>Reject</OutlineButton>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {tab === "suppliers" && (
+        <div className="space-y-4">
+          <div className="flex justify-end"><Button onClick={addProv}>Add Provider</Button></div>
+          <div className="grid grid-cols-1 gap-3">
+            {prov.map(p => (
+              <div key={p.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <img src={p.logo || (p.website ? `https://www.google.com/s2/favicons?domain=${new URL(p.website).hostname}&sz=64` : "")} className="h-8 w-8 rounded-full border border-gray-200 bg-white" alt=""/>
+                    <div>
+                      <div className="font-semibold">{p.name}</div>
+                      <div className="text-xs text-gray-500">{p.category_id} · {p.website || "—"} {p.is_featured ? "· Featured" : ""} {p.tier && p.tier !== 'free' ? `· ${p.tier}` : ''}</div>
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    <OutlineButton onClick={() => editProv(p)}>Edit</OutlineButton>
+                    <OutlineButton onClick={() => toggleShow(p.id, !p.is_active)}>{p.is_active ? "Hide" : "Show"}</OutlineButton>
+                    <Button onClick={() => delProv(p.id)}>Delete</Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {prov.length === 0 && <div className="rounded-xl border border-dashed border-gray-300 p-6 text-gray-600">No providers yet.</div>}
+          </div>
+        </div>
+      )}
+
+      {tab === "categories" && (
+        <div className="space-y-4">
+          <div className="flex justify-end"><Button onClick={addCat}>Add Category</Button></div>
+          <div className="grid grid-cols-1 gap-3">
+            {cats.map(c => (
+              <div key={c.id} className="rounded-2xl border border-gray-200 bg-white p-4 shadow-sm">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-semibold">{c.label}</div>
+                    <div className="text-xs text-gray-500">id: {c.id}</div>
+                  </div>
+                  <div className="flex gap-2">
+                    <OutlineButton onClick={() => editCat(c)}>Edit</OutlineButton>
+                    <Button onClick={() => deleteCat(c)}>Delete</Button>
+                  </div>
+                </div>
+              </div>
+            ))}
+            {cats.length === 0 && <div className="rounded-xl border border-dashed border-gray-300 p-6 text-gray-600">No categories.</div>}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function AdminPortal() {
+  const [user, setUser] = useState(null);
+  const [allowed, setAllowed] = useState(false);
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      setUser(user || null);
+      if (!user) return;
+      const { data: rows } = await supabase.from("profiles").select("role").eq("id", user.id).single();
+      setAllowed(rows?.role === "admin");
+    })();
+  }, []);
+  if (!supabase) return <section className="mx-auto max-w-2xl px-4 py-10">Supabase env not configured.</section>;
+  if (!user) return <AdminLogin />;
+  if (!allowed) return <section className="mx-auto max-w-2xl px-4 py-10">Signed in, but not an admin.</section>;
+  return <AdminDashboard />;
 }
 
 /***********************************\
@@ -581,7 +825,7 @@ function Header({ hash }) {
 
 function Footer() {
   return (
-    <footer className="mt-20 border-t border-gray-200 bg-white">
+    <footer className="mt-20 border-t border-gray-200 bg:white">
       <div className="mx-auto grid max-w-7xl gap-8 px-4 py-10 md:grid-cols-3">
         <div>
           <div className="mb-2 flex items-center gap-2">
@@ -598,6 +842,7 @@ function Footer() {
             <li><a className="hover:underline" href="#learning">Learning Center</a></li>
             <li><a className="hover:underline" href="#submit">Submit Listing</a></li>
             <li><a className="hover:underline" href="#contact">Contact</a></li>
+            <li><a className="hover:underline" href="#admin">Admin</a></li>
           </ul>
         </div>
         <div>
@@ -620,7 +865,7 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gradient-to-b from-white to-gray-50 text-gray-900">
       <Header hash={hash || "#home"} />
-      {(!hash || hash==="#home") && (<><Home /><section className="mx-auto mt-6 max-w-7xl px-4"><dl className="grid w-full grid-cols-2 gap-6 sm:max-w-xl"><div><div className="text-2xl font-extrabold text-gray-900">7</div><div className="text-sm text-gray-600">Core Categories</div></div><div><div className="text-2xl font-extrabold text-gray-900">≥25</div><div className="text-sm text-gray-600">UK Providers</div></div><div><div className="text-2xl font-extrabold text-gray-400">Compare</div><div className="text-sm text-gray-600">Select up to 3</div></div><div><div className="text-2xl font-extrabold text-gray-400">Favorites</div><div className="text-sm text-gray-600">Saved locally</div></div></dl></section></>)}
+      {(!hash || hash==="#home") && (<Home />)}
       {hash==="#providers" && (<Providers state={state} dispatch={dispatch} favorites={favorites} setFavorites={setFavorites} compare={compare} setCompare={setCompare} />)}
       {hash==="#favorites" && (<Favorites favorites={favorites} setFavorites={setFavorites} />)}
       {hash==="#compare" && (<Compare compare={compare} setCompare={setCompare} />)}
@@ -628,6 +873,7 @@ export default function App() {
       {hash==="#learning" && (<LearningCenter />)}
       {hash==="#submit" && (<SubmitListing />)}
       {hash==="#contact" && (<Contact />)}
+      {hash==="#admin" && (<AdminPortal />)}
       <Footer />
 
       {/**
@@ -652,8 +898,15 @@ export default function App() {
        *   discount_details text,
        *   logo text,
        *   is_active boolean default true,
+       *   is_featured boolean default false,
+       *   feature_until timestamptz,
+       *   tier text default 'free',
        *   created_at timestamptz default now()
        * );
+       *
+       * create index if not exists providers_category_idx on public.providers(category_id);
+       * create index if not exists providers_active_idx   on public.providers(is_active);
+       * create index if not exists providers_featured_idx on public.providers(is_featured);
        *
        * create table if not exists public.listing_submissions (
        *   id uuid primary key default gen_random_uuid(),
@@ -662,6 +915,10 @@ export default function App() {
        *   website text,
        *   description text,
        *   discount text,
+       *   status text check (status in ('new','approved','rejected')) default 'new',
+       *   reviewed_at timestamptz,
+       *   reviewed_by text,
+       *   notes text,
        *   created_at timestamptz default now()
        * );
        *
@@ -673,16 +930,59 @@ export default function App() {
        *   created_at timestamptz default now()
        * );
        *
+       * -- Roles / profiles for admin auth
+       * create table if not exists public.profiles (
+       *   id uuid primary key references auth.users(id) on delete cascade,
+       *   email text unique,
+       *   role text check (role in ('admin','editor','viewer')) default 'viewer',
+       *   created_at timestamptz default now()
+       * );
+       * create or replace function public.handle_new_user() returns trigger language plpgsql security definer as $$
+       * begin
+       *   insert into public.profiles (id,email,role)
+       *   values (new.id, new.email, 'viewer') on conflict (id) do nothing;
+       *   return new;
+       * end; $$;
+       * drop trigger if exists on_auth_user_created on auth.users;
+       * create trigger on_auth_user_created after insert on auth.users for each row execute procedure public.handle_new_user();
+       * -- MANUALLY promote yourself: update public.profiles set role='admin' where email ilike 'you@yourcompany.com';
+       *
+       * -- RLS
        * alter table public.categories enable row level security;
        * alter table public.providers enable row level security;
        * alter table public.listing_submissions enable row level security;
        * alter table public.contact_messages enable row level security;
+       * alter table public.profiles enable row level security;
        *
-       * create policy "Anyone can read categories" on public.categories for select using (true);
-       * create policy "Anyone can read providers"  on public.providers  for select using (true);
-       * create policy "Anon can insert listing submissions" on public.listing_submissions for insert using (true) with check (true);
-       * create policy "Anon can insert contact messages"   on public.contact_messages   for insert using (true) with check (true);
+       * -- Public reads
+       * create policy "Public read categories" on public.categories for select using (true);
+       * create policy "Public read providers"  on public.providers  for select using (true);
        *
+       * -- Submissions: public insert; admins read/update/delete
+       * create policy "Public submit listings" on public.listing_submissions for insert using (true) with check (true);
+       * create policy "Admins read submissions" on public.listing_submissions for select using (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.role='admin'));
+       * create policy "Admins update submissions" on public.listing_submissions for update using (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.role='admin')) with check (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.role='admin'));
+       * create policy "Admins delete submissions" on public.listing_submissions for delete using (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.role='admin'));
+       *
+       * -- Providers/Categories write only by admins
+       * create policy "Admins manage providers" on public.providers for all using (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.role='admin')) with check (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.role='admin'));
+       * create policy "Admins manage categories" on public.categories for all using (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.role='admin')) with check (exists (select 1 from public.profiles pr where pr.id = auth.uid() and pr.role='admin'));
+       *
+       * -- Approve helper
+       * create or replace function public.approve_submission(sub_id uuid, publish boolean default true)
+       * returns void language plpgsql security definer as $$
+       * declare s record;
+       * begin
+       *   select * into s from public.listing_submissions where id=sub_id;
+       *   if not found then raise exception 'Submission % not found', sub_id; end if;
+       *   if publish then
+       *     insert into public.providers (name, category_id, tags, website, summary, details, discount_label, discount_details, logo, is_active)
+       *     values (s.company_name, s.category_id, '{}', s.website, coalesce(s.description,'Submitted via Appy Link'), s.description, s.discount, null, null, true);
+       *   end if;
+       *   update public.listing_submissions set status='approved', reviewed_at=now() where id=sub_id;
+       * end $$;
+       *
+       * -- Seeds
        * insert into public.categories (id,label) values
        * ('marketing','Marketing / Advertising'),
        * ('software','Moving Software & CRM'),
