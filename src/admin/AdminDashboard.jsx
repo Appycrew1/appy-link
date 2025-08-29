@@ -10,6 +10,13 @@ export default function AdminDashboard() {
   const [cats, setCats] = useState([]);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const BOOTSTRAP = import.meta?.env?.VITE_BOOTSTRAP_ADMIN_EMAIL?.toLowerCase?.();
+useEffect(() => {
+  if (BOOTSTRAP && session?.user?.email?.toLowerCase() === BOOTSTRAP) {
+    setIsAdmin(true);
+  }
+}, [BOOTSTRAP, session?.user?.email]);
+
 
   const load = async () => {
     setLoading(true);
