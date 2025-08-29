@@ -7,29 +7,24 @@ import AdminDashboard from "./AdminDashboard";
 export default function AdminPortal() {
   const [session, setSession] = useState(null);
   const [checking, setChecking] = useState(true);
-  const [profile, setProfile] = useState(null);
-  const [error, setError] = useState("");
+  const [recovering, setRecovering] = useState(false);
+  const [newPass, setNewPass] = useState("");
+  const [msg, setMsg] = useState("");
 
-  // Helper to read current session safely
   const readSession = async () => {
-    try {
-      const { data, error } = await supabase.auth.getSession();
-      if (error) throw error;
-      setSession(data.session || null);
-    } catch (e) {
-      setError(e.message);
-      setSession(null);
-    } finally {
-      setChecking(false);
-    }
+    const { data, error } = await supabase.auth.getSession();
+    if (!error) setSession(data.session || null);
+    setChecking(false);
   };
 
-  // On mount: get session, then subscribe to changes
   useEffect(() => {
     if (!supabase) return;
     (async () => {
       await readSession();
-      const { data: sub } = supabase.auth.onAuthStateChange((_event, s) => {
+      const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
+        if (event === "PASSWORD_RECOVERY") {
+          setRecovering(true);
+        }
         setSession(s || null);
         setChecking(false);
       });
@@ -37,77 +32,44 @@ export default function AdminPortal() {
     })();
   }, []);
 
-  // Load profile (role) if we have a user
-  useEffect(() => {
-    (async () => {
-      if (!session?.user) { setProfile(null); return; }
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("email, role")
-          .eq("id", session.user.id)
-          .maybeSingle();
-        if (error) throw error;
-        setProfile(data || null);
-      } catch (e) {
-        setProfile(null);
-      }
-    })();
-  }, [session?.user?.id]);
+  const submitNewPassword = async (e) => {
+    e.preventDefault();
+    setMsg("");
+    const { error } = await supabase.auth.updateUser({ password: newPass });
+    setMsg(error ? error.message : "Password updated. You are now signed in.");
+    if (!error) setRecovering(false);
+  };
 
-  // Not configured
   if (!supabase) {
     return (
       <section className="mx-auto max-w-xl px-4 py-10">
         <h2 className="mb-2 text-2xl font-bold">Supabase not configured</h2>
         <ol className="list-decimal pl-5 text-sm text-gray-700 space-y-1">
-          <li>Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Vercel (Preview + Production).</li>
+          <li>Set <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in Vercel.</li>
           <li>Redeploy the site.</li>
-          <li>Supabase → Auth → URL Config: add <code>{window.location.origin}/#admin</code> to Redirect URLs.</li>
+          <li>Supabase → Auth → URL Config: add <code>{window.location.origin}/#admin</code>.</li>
         </ol>
       </section>
     );
   }
 
-  // Still checking session?
   if (checking) return <section className="mx-auto max-w-2xl px-4 py-10">Checking session…</section>;
 
-  // No session → show login
+  // Password recovery UI
+  if (recovering) {
+    return (
+      <section className="mx-auto max-w-sm px-4 py-10">
+        <h2 className="mb-4 text-2xl font-bold">Reset Password</h2>
+        <form onSubmit={submitNewPassword} className="space-y-3">
+          <input className="block w-full rounded-2xl border border-gray-300 px-4 py-2 text-sm" type="password" placeholder="New password" value={newPass} onChange={(e)=>setNewPass(e.target.value)} required />
+          <button className="inline-flex items-center justify-center rounded-2xl bg-gray-900 px-4 py-2 text-sm font-semibold text-white" type="submit">Update password</button>
+        </form>
+        {msg && <p className="mt-3 text-sm text-gray-700">{msg}</p>}
+      </section>
+    );
+  }
+
   if (!session) return <AdminLogin />;
 
-  // Session exists → ALWAYS render dashboard; show debug above it
-  return (
-    <section>
-      <div className="mx-auto my-4 max-w-5xl rounded-xl border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <div><strong>Signed in as:</strong> {session.user?.email || "(no email)"} · <strong>User ID:</strong> {session.user?.id?.slice(0,8)}…</div>
-            <div><strong>Profile role:</strong> {profile?.role || "unknown"} {profile?.email ? `(${profile.email})` : ""}</div>
-            {error && <div className="text-red-700"><strong>Error:</strong> {error}</div>}
-          </div>
-          <div className="flex gap-2">
-            <button
-              onClick={async()=>{ await supabase.auth.signOut(); location.reload(); }}
-              className="rounded-lg border border-blue-300 bg-white px-3 py-1 font-semibold text-blue-900 hover:bg-blue-100"
-            >Sign out</button>
-            <button
-              onClick={()=>location.reload()}
-              className="rounded-lg border border-blue-300 bg-white px-3 py-1 font-semibold text-blue-900 hover:bg-blue-100"
-            >Reload</button>
-          </div>
-        </div>
-        <div className="mt-2">
-          <details><summary>Debug JSON</summary>
-            <pre className="mt-2 overflow-auto rounded bg-white p-2">{JSON.stringify({
-              origin: window.location.origin,
-              hash: window.location.hash,
-              user: { id: session.user?.id, email: session.user?.email },
-              profile
-            }, null, 2)}</pre>
-          </details>
-        </div>
-      </div>
-      <AdminDashboard />
-    </section>
-  );
+  return <AdminDashboard />;
 }
