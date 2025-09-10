@@ -13,6 +13,7 @@ export default function AdminPortal() {
   useEffect(() => {
     const readSession = async () => {
       const { data, error } = await supabase.auth.getSession();
+      console.log("Initial session check", data, error);
       if (!error) setSession(data.session || null);
       setChecking(false);
     };
@@ -20,9 +21,8 @@ export default function AdminPortal() {
     readSession();
 
     const { data: sub } = supabase.auth.onAuthStateChange((event, s) => {
-      if (event === "PASSWORD_RECOVERY") {
-        setRecovering(true);
-      }
+      console.log("Auth state changed:", event, s);
+      if (event === "PASSWORD_RECOVERY") setRecovering(true);
       setSession(s || null);
       setChecking(false);
     });
@@ -51,7 +51,8 @@ export default function AdminPortal() {
     );
   }
 
-  if (checking) return <section className="mx-auto max-w-2xl px-4 py-10">Checking session…</section>;
+  if (checking)
+    return <section className="mx-auto max-w-2xl px-4 py-10">Checking session…</section>;
 
   if (recovering) {
     return (
@@ -78,7 +79,16 @@ export default function AdminPortal() {
     );
   }
 
-  if (!session) return <AdminLogin />;
+  if (!session) {
+    console.log("No session found, showing login");
+    return <AdminLogin />;
+  }
 
-  return <AdminDashboard />;
+  console.log("Session found, rendering dashboard", session);
+  try {
+    return <AdminDashboard />;
+  } catch (err) {
+    console.error("Failed to render AdminDashboard:", err);
+    return <div className="p-10 text-center text-red-600">Error loading dashboard. Check console.</div>;
+  }
 }
