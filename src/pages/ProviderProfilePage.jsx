@@ -166,7 +166,12 @@ export default function ProviderProfilePage() {
   const [media, setMedia] = useState([]);
   const [reviews, setReviews] = useState([]);
 
-  const providerId = useMemo(() => new URLSearchParams(window.location.search).get("id"), []);
+  const location = useLocation();
+const providerId = useMemo(() => {
+  // With HashRouter, location.search contains "?id=..." correctly
+  return new URLSearchParams(location.search).get("id");
+}, [location.search]);
+
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => setSession(data.session));
