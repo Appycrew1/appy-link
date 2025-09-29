@@ -1,17 +1,17 @@
 // src/App.jsx
-import React, { Suspense, lazy, useEffect } from "react";
-import { HashRouter, Routes, Route, Link, Navigate, useLocation } from "react-router-dom";
+import React from "react";
+import { HashRouter, Routes, Route, Link, Navigate } from "react-router-dom";
 
-/* ===== Lazy-loaded pages (paths match your structure) ===== */
-const ProviderProfilePage = lazy(() => import("./pages/ProviderProfilePage.jsx"));
-const AdminPortal         = lazy(() => import("./admin/AdminPortal.jsx"));
+// Direct imports so we avoid any lazy-loading issues
+import ProviderProfilePage from "./pages/ProviderProfilePage.jsx";
+import AdminPortal from "./admin/AdminPortal.jsx"; // keep if you have it; otherwise stub it
 
-/* ===== Simple Home (replace with your real Home component if you have one) ===== */
+// TEMP Home page (replace with your real one if you have it)
 function Home() {
   return (
     <div style={{ padding: 24 }}>
-      <h1 style={{ marginBottom: 8 }}>Appy Link</h1>
-      <p>Welcome! Try these:</p>
+      <h1>Appy Link</h1>
+      <p>Quick links for testing:</p>
       <ul>
         <li><Link to="/admin">Admin</Link></li>
         <li><Link to="/provider?id=REPLACE_WITH_PROVIDER_ID">Provider Profile</Link></li>
@@ -20,64 +20,24 @@ function Home() {
   );
 }
 
-/* ===== Loader while pages stream in ===== */
-function Loader() {
-  return <div style={{ padding: 24 }}>Loading…</div>;
-}
-
-/* ===== Normalize old-style hashes like "#provider" → "#/provider" ===== */
-function HashNormalizer() {
-  useEffect(() => {
-    if (location.hash.startsWith("#provider")) {
-      location.replace("#" + location.hash.replace("#provider", "/provider"));
-    }
-    if (location.hash === "#admin") {
-      location.replace("#/admin");
-    }
-  }, []);
-  return null;
-}
-
-/* ===== Scroll to top on route change (nice to have) ===== */
-function ScrollToTop() {
-  const { pathname, search } = useLocation();
-  useEffect(() => {
-    window.scrollTo(0, 0);
-  }, [pathname, search]);
-  return null;
-}
-
-/* ===== App with HashRouter ===== */
 export default function App() {
   return (
     <HashRouter>
-      <HashNormalizer />
-      <ScrollToTop />
-      <Suspense fallback={<Loader />}>
-        <Routes>
-          <Route path="/" element={<Home />} />
-
-          {/* Admin portal: https://your-site/#/admin */}
-          <Route path="/admin" element={<AdminPortal />} />
-
-          {/* Provider profile: https://your-site/#/provider?id=UUID */}
-          <Route path="/provider" element={<ProviderProfilePage />} />
-
-          {/* Helpful redirect if someone types '#/providers' */}
-          <Route path="/providers" element={<Navigate to="/provider" replace />} />
-
-          {/* 404 */}
-          <Route
-            path="*"
-            element={
-              <div style={{ padding: 24 }}>
-                <h2>404 — Not Found</h2>
-                <p><Link to="/">Go Home</Link></p>
-              </div>
-            }
-          />
-        </Routes>
-      </Suspense>
+      <Routes>
+        <Route path="/" element={<Home />} />
+        <Route path="/admin" element={<AdminPortal />} />
+        <Route path="/provider" element={<ProviderProfilePage />} />
+        <Route path="/providers" element={<Navigate to="/provider" replace />} />
+        <Route
+          path="*"
+          element={
+            <div style={{ padding: 24 }}>
+              <h2>404 — Not Found</h2>
+              <p><Link to="/">Go Home</Link></p>
+            </div>
+          }
+        />
+      </Routes>
     </HashRouter>
   );
 }
