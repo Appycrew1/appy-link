@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useLocation } from "react-router-dom"; 
 import { createClient } from "@supabase/supabase-js";
 import { Star, CheckCircle2, MapPin, Globe, Users, Shield, Heart, HeartOff, Phone, Mail, Play, Camera, Loader2 } from "lucide-react";
 
